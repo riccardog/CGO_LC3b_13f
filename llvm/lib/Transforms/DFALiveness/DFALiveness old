@@ -1,0 +1,564 @@
+//===- DFALiveness.cpp - Example code from "Writing an LLVM Pass" ---------------===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements two versions of the LLVM "DFALiveness World" pass described
+// in docs/WritingAnLLVMPass.html
+//
+//===----------------------------------------------------------------------===//
+
+#include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/StringMap.h"
+#include "llvm/IR/Function.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/FormattedStream.h"
+#include "llvm/ADT/DepthFirstIterator.h"
+#include "llvm/ADT/GraphTraits.h"
+#include "llvm/Support/CFG.h"
+#include <map>
+#include <set>
+#include <stdlib.h>
+#include <iostream>
+#include <fstream>
+#include <time.h>
+
+using namespace llvm;
+
+
+namespace {
+class DFANode;
+class MKVector;
+
+
+  // DFALiveness - The first implementation, without getAnalysisUsage.
+  struct DFALiveness : public FunctionPass {
+    static char ID; // Pass identification, replacement for typeid
+    DFALiveness() : FunctionPass(ID) {}
+
+	void ExampleCode ( raw_ostream& O, Function & F);
+
+	void LivenessAnalysis( Function & F);
+	void PrintLivenessInfoToDot( raw_ostream &O, Function & F);
+
+    virtual bool runOnFunction(Function &F) {
+      errs() << "DFALiveness: ";
+      errs().write_escaped(F.getName()) << '\n';
+	  ExampleCode(errs(), F);
+	  LivenessAnalysis(F);
+	  PrintLivenessInfoToDot(errs(), F);
+      return false;
+    }
+  };
+
+  class MKVector
+  	{
+  	public:
+  		std::vector<int> bitVector;
+
+  	MKVector()
+  		{
+  		bitVector.push_back(0);
+  		}
+
+  	MKVector(int size)
+  		{
+  		for(int i = 0; i < (size/32)+1; i++)
+  			{
+  			bitVector.push_back(0);
+  			}
+  		}
+
+  	void set(int x)
+  		{
+  		//llvm::errs()<<"Sett*ot)ing var bit "<<x<<"\n";
+  		while(bitVector.size() < (x/32)+1)
+  			{
+  			bitVector.push_back(0);
+  			}
+  		//llvm::errs()<<"Setting var bit "<<x<<"\n";
+  		bitVector.at(x/32) = bitVector.at(x/32) | (1<<((x)%32));
+  		}
+
+  	bool bitUnion(MKVector *op)
+  		{
+  		bool ret = false;
+
+  		while(op->bitVector.size() < bitVector.size())
+  			{
+  			op->bitVector.push_back(0);
+  			}
+
+  		while(op->bitVector.size() > bitVector.size())
+  			{
+  			bitVector.push_back(0);
+  			}
+
+  		int temp;
+  		std::vector<int>::iterator it = bitVector.begin();
+  		std::vector<int>::iterator et = bitVector.end();
+  		std::vector<int>::iterator ot = op->bitVector.begin();
+
+
+  		while(it != et)
+  			{
+  			temp = *it | *ot;
+  			ret = (temp != *it) | ret;
+  			*it = temp;
+  			it++;
+  			ot++;
+  			}
+
+  		return ret;
+  		}
+
+  	bool bitIntersect(MKVector *op)
+  		{
+  		bool ret = false;
+
+  		while(op->bitVector.size() < bitVector.size())
+  			{
+  			op->bitVector.push_back(0);
+  			}
+
+  		while(op->bitVector.size() > bitVector.size())
+  			{
+  			bitVector.push_back(0);
+  			}
+
+  		int temp;
+  		std::vector<int>::iterator it = bitVector.begin();
+  		std::vector<int>::iterator et = bitVector.end();
+  		std::vector<int>::iterator ot = op->bitVector.begin();
+
+
+  		while(it != et)
+  			{
+  			temp = *it & *ot;
+  			ret = (temp != *it) | ret;
+  			*it = temp;
+  			it++;
+  			ot++;
+  			}
+  		return ret;
+  		}
+
+  	bool bitExclude(MKVector *op)
+  		{
+  		bool ret = false;
+
+  		while(op->bitVector.size() < bitVector.size())
+  			{
+  			op->bitVector.push_back(0);
+  			}
+
+  		while(op->bitVector.size() > bitVector.size())
+  			{
+  			bitVector.push_back(0);
+  			}
+
+  		int temp;
+  		std::vector<int>::iterator it = bitVector.begin();
+  		std::vector<int>::iterator et = bitVector.end();
+  		std::vector<int>::iterator ot = op->bitVector.begin();
+
+
+  		while(it != et)
+  			{
+  			temp =*ot;
+  			temp = *it & ~temp;
+  			ret = (temp != *it) | ret;
+  			*it = temp;
+  			it++;
+  			ot++;
+  			}
+  		return ret;
+  		}
+
+  	bool vectorCompareAndSet(MKVector *op)
+  		{
+  		bool ret = false;
+
+  		while(op->bitVector.size() > bitVector.size())
+  			{
+  		  	bitVector.push_back(0);
+  		  	}
+
+  		while(op->bitVector.size() < bitVector.size())
+  		  	{
+  		  	op->bitVector.push_back(0);
+  		  	}
+
+  		std::vector<int>::iterator it = bitVector.begin();
+  		std::vector<int>::iterator et = bitVector.end();
+  		std::vector<int>::iterator ot = op->bitVector.begin();
+  		int index = 1;
+
+  		while(it != et)
+  			{
+  			//if(!ret && (*ot != *it))
+  				//{
+  			  	//llvm::errs()<<"Compare and Set: Size of bitvector: "<<bitVector.size();
+  			  	//llvm::errs()<<" Index:"<<index<<" "<<*ot<<" "<<*it<<"\n";
+  			  	//}
+  		  	ret = (*ot != *it) | ret;
+  		  	*it = *ot;
+  		  	it++;
+  		  	ot++;
+  		  	index++;
+  			}
+
+  		return ret;
+  		}
+
+  	bool vectorCompare(MKVector *op)
+  		{
+  	  	bool ret = false;
+
+  	  	while(op->bitVector.size() > bitVector.size())
+  	  		{
+  	  	  	bitVector.push_back(0);
+  	  	  	}
+
+  	  while(op->bitVector.size() < bitVector.size())
+  	    	{
+  		    op->bitVector.push_back(0);
+  	    	}
+
+  	  	std::vector<int>::iterator it = bitVector.begin();
+  	  	std::vector<int>::iterator et = bitVector.end();
+  	  	std::vector<int>::iterator ot = op->bitVector.begin();
+  	  	int index = 1;
+
+  	  	while(it != et)
+  	  		{
+  	  		//if(!ret && (*ot != *it))
+  	  	  		//{
+  	  	  		//llvm::errs()<<"Compare        : Size of bitvector: "<<bitVector.size();
+  	  	  		//llvm::errs()<<" Index:"<<index<<" "<<*ot<<" "<<*it<<"\n";
+  	  	  		//}
+  	  		ret = (*ot != *it) | ret;
+  	  		it++;
+  	  		ot++;
+  	  		index++;
+  	  		}
+  	  	return ret;
+  	  	}
+
+  	std::vector<int> getVectorRepresentation()
+  		{
+  		std::vector<int> *ret = new std::vector<int>();
+  		int temp;
+  		for(int i = 0; i < bitVector.size(); i++)
+  			{
+  			temp = bitVector.at(i);
+  			for(int j = 0; j < 32; j++)
+  				{
+  				if(temp & 1<<j)
+  					{
+  					ret->push_back(i*32+j);
+  					}
+  				}
+  			}
+
+  		return *ret;
+  		}
+
+  	void printMKVectorVars(raw_ostream& O, std::map<int, StringRef> varMap)
+  		{
+  		int temp;
+  		for(int i = 0; i < bitVector.size(); i++)
+  			{
+  			temp = bitVector.at(i);
+  			for(int j = 0; j < 32; j++)
+  				{
+  		  		if(temp & 1<<j)
+  		  			{
+  		  			O<<" "<<varMap[i*32+j];
+  		  			}
+  		  		}
+  		  	}
+  		}
+
+  	};
+
+class DFANode{
+public:
+	  BasicBlock *block;
+	  MKVector inVars;
+	  MKVector outVars;
+	  MKVector defVars;
+	  MKVector useVars;
+	  int nodeID;
+
+	  DFANode(BasicBlock *BB)
+	  	  {
+		  block = BB;
+	  	  }
+
+  void addVarToUse(int x)
+  	  {
+	  useVars.set(x);
+  	  }
+
+  void addVarToDef(int x)
+  	  {
+	  defVars.set(x);
+  	  }
+
+  void unionInAndUse()
+  	  {
+	  inVars.bitUnion(&useVars);
+  	  }
+
+  void excludeInAndDef()
+  	  {
+	  inVars.bitExclude(&defVars);
+  	  }
+
+  bool getInVars(std::map<StringRef, DFANode*> node_map, int visited[])
+  	  {
+	  bool ret = false;
+
+	  //llvm::errs()<<"Node: "<<block->getName()<<" with id "<<nodeID<<" visited "<<visited[nodeID]<<"\n";
+
+	  if(!visited[nodeID])
+	  	  {
+		  MKVector *tempV = new MKVector();
+		  visited[nodeID] = 1;
+
+		  //llvm::errs()<<"Checking in for "<<block->getName()<<"\n";
+
+		  ret = ret | calcOutVars(node_map, visited);
+		  tempV->bitUnion(&outVars);
+		  tempV->bitUnion(&useVars);
+		  tempV->bitExclude(&defVars);
+
+		  //if(inVars.vectorCompare(tempV))
+		  	  //{
+			  //llvm::errs()<<"Block: "<<block->getName()<<" In vector changed\n";
+			  //MKVector *tempex = new MKVector();
+			  //MKVector *tempVP = new MKVector();
+			  //tempex->vectorCompareAndSet(&inVars);
+			  //tempVP->vectorCompareAndSet(tempV);
+			  //tempex->bitExclude(tempV);
+			  //llvm::errs()<<"Pre exclude compare\n";
+			  //tempVP->vectorCompare(tempV);
+			  //llvm::errs()<<"Post exclude compare "<<inVars.vectorCompare(tempV)<<"\n";
+			  //std::vector<int> tempx = tempV->getVectorRepresentation();
+			  // for(std::vector<int>::iterator it = tempx.begin(); it != tempx.end(); ++it)
+			  // 	  {
+			  //llvm::errs()<<tempx.size()<<"\n";
+			  // 	  }
+			  //llvm::errs()<<"\n";
+			  //delete tempex;
+			  //delete tempVP;
+		  	  //}
+
+		  ret = ret | inVars.vectorCompareAndSet(tempV);
+
+		  delete tempV;
+	  	  }
+	  return ret;
+  	  }
+
+  bool calcOutVars(std::map<StringRef, DFANode*> node_map, int visited[])
+  	  {
+	  bool ret = false;
+
+	  //llvm::errs()<<"Checking out for "<<block->getName()<<"\n";
+
+	  succ_iterator SI = succ_begin(block), E = succ_end(block);
+	  MKVector *tempV = new MKVector();
+	  DFANode *succ_node;
+	  for ( ; SI != E; SI ++)
+	  	  {
+	  	  BasicBlock * succ_bb = *SI;
+	  	  succ_node = node_map[succ_bb->getName()];
+	  	  ret = ret | succ_node->getInVars(node_map, visited);
+	  	  tempV->bitUnion(&(succ_node->inVars));
+	  	  }
+
+	  //if(outVars.vectorCompare(tempV))
+	  	  //{
+		  //llvm::errs()<<"Block: "<<block->getName()<<" Out vector changed\n";
+		  //MKVector *tempex = new MKVector();
+		  //tempex->vectorCompareAndSet(&outVars);
+		  //tempex->bitExclude(tempV);
+		  //std::vector<int> tempx = tempex->getVectorRepresentation();
+		  //for(std::vector<int>::iterator it = tempx.begin(); it != tempx.end(); ++it)
+		  //	  {
+			  //llvm::errs()<<tempx.size()<<"\n";
+		  //	  }
+		 // llvm::errs()<<"\n";
+
+	  	  //}
+
+	  ret = ret | outVars.vectorCompareAndSet(tempV);
+	  delete tempV;
+	  return ret;
+  	  }
+
+  };
+
+char DFALiveness::ID = 0;
+static RegisterPass<DFALiveness> X("dfaliveness", "Data-flow analysis: liveness analysis pass");
+
+void DFALiveness::ExampleCode(raw_ostream& O, Function& F)
+	{
+	time_t begin;
+	time_t end;
+
+	time(&begin);
+
+	std::string error_info;
+	llvm::raw_fd_ostream myfile("liveness.dot", error_info);
+
+	std::map<StringRef,int> var_id_map;
+	std::map<int, StringRef> var_name_map;
+	std::map<StringRef, DFANode*> node_map;
+	int currentID = 0;
+	int currentNodeID = 0;
+
+	//O << "All Variables Defined in Function " << F.getName() <<   "\n";
+	for (Function::iterator FI = F.begin(), FE = F.end(); FI != FE; ++FI)
+		{
+		BasicBlock* BB = dyn_cast<BasicBlock>(&*FI);
+		DFANode *tempN = new DFANode(BB);
+		tempN->nodeID = currentNodeID;
+		currentNodeID++;
+		node_map[BB->getName()] = tempN;
+		//O<<"Block "<<BB->getName()<<"\n";
+		for (BasicBlock::iterator BI = BB->begin(), BE = BB->end(); BI != BE; ++BI)
+			{
+			if ( BI->hasName() )
+				{
+				StringRef var_name = BI->getValueName()->first();
+				//O << "VARIABLE:\t" << var_name; //<< "\tdefined in ";
+				//BI->print(O);
+				//O << "\n";
+				var_id_map[var_name] = currentID;
+				var_name_map[currentID] = var_name;
+				tempN->addVarToDef(currentID);
+				currentID++;
+				}
+			}
+
+		}
+
+	for (Function::iterator FI = F.begin(), FE = F.end(); FI != FE; ++FI)
+		{
+		BasicBlock* BB = dyn_cast<BasicBlock>(&*FI);
+		DFANode *tempN = node_map[BB->getName()];
+		//O << "----------------------------------------------------\n";
+		//O << "BB: " << BB ->getName() << '\n';
+		//O << "\t All instructions in this bb:\n";
+		for (BasicBlock::iterator BI = BB->begin(), BE = BB->end(); BI != BE; ++BI)
+			{
+			//O << "\t";
+			//BI->print(O);
+			//O << "\n";
+			//O << "\t\tAll operands in this instruction: \n";
+			int operand_size = BI->getNumOperands();
+			for ( int i = 0; i < operand_size; i ++ )
+				{
+				//O << "\t\t\t" << i << ": ";
+				Value * operand = BI->getOperand(i);
+				if ( operand->hasName() )
+					{
+					StringRef op_name = operand->getValueName()->first();
+					if ( var_id_map.find(op_name) != var_id_map.end() )
+						{
+						//O << "\tVar: " << op_name<< " with id: "<<var_id_map[op_name];
+						tempN->addVarToUse(var_id_map[op_name]);
+						}
+					else
+						{
+						//O << "\tNot a Var: " << op_name;
+						}
+					}
+				else
+					{
+					//O << "\tNot a Var: no name";
+					}
+				//O << "\n";
+				}
+
+			}
+		tempN->unionInAndUse();
+		tempN->excludeInAndDef();
+		}
+
+
+
+	int* visited = new int[currentNodeID];
+	for(int i = 0; i < currentNodeID; i++)
+		{
+		visited[i] = 0;
+		}
+	int x = 0;
+	while(node_map["entry"]->getInVars(node_map, visited))
+		{
+		for(int i = 0; i < currentNodeID; i++)
+			{
+			visited[i] = 0;
+			}
+		x++;
+		//if(x%100 == 0)
+			//{
+			O<<"Loop iteration "<<x<<"\n";
+			//}
+		}
+
+	time(&end);
+
+	O<<"nodes: "<<currentNodeID<<" vars: "<<currentID<<" compeleted in "<<difftime(end, begin)<<"\n";
+
+
+
+	for (Function::iterator FI = F.begin(), FE = F.end(); FI != FE; ++FI)
+			{
+			BasicBlock* BB = dyn_cast<BasicBlock>(&*FI);
+			myfile<<BB->getName()<<" with children: ";
+			succ_iterator SI = succ_begin(BB), E = succ_end(BB);
+			for ( ; SI != E; SI ++)
+				{
+				BasicBlock * succ_bb = *SI;
+				myfile<<succ_bb->getName()<<" ";
+				}
+
+			myfile<<"\nIn Vars: ";
+			node_map[BB->getName()]->inVars.printMKVectorVars(myfile, var_name_map);
+			//myfile<<"\nDef Vars: ";
+			//node_map[BB->getName()]->defVars.printMKVectorVars(myfile, var_name_map);
+			//myfile<<"\nUse Vars: ";
+			//node_map[BB->getName()]->useVars.printMKVectorVars(myfile, var_name_map);
+			myfile<<"\nOut Vars: ";
+			node_map[BB->getName()]->outVars.printMKVectorVars(myfile, var_name_map);
+			myfile<<"\n\n";
+
+			}
+
+}
+
+
+void DFALiveness::LivenessAnalysis( Function & F) {
+
+}
+
+void DFALiveness::PrintLivenessInfoToDot( raw_ostream &O, Function & F) {
+
+}
+
+
+
+
+
+}
+
+

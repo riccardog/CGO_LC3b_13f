@@ -1,0 +1,16 @@
+#!/bin/bash
+
+backDir=$(pwd)
+
+make clean; make
+
+cd $backDir
+rm $1.bc
+rm $1_ccp_transformed.bc
+clang -emit-llvm -c $1.c -o $1.bc
+opt -mem2reg $1.bc -f > $1_ccp.bc 
+sudo opt -load ../../../Release+Asserts/lib/ConditionalConstantPropagation.so  -conditional-constant-propagation $1_ccp.bc -f > $1_ccp_transformed.bc 
+sudo opt -load ../../../Release+Asserts/lib/ConditionalConstantPropagation.so  -simplifycfg $1_ccp_transformed.bc -f > $1_ccp_simplified.bc 
+
+opt -dot-cfg $1_ccp_simplified.bc -o $1.dot
+dot -Tpdf -O cfg.main.dot

@@ -1,0 +1,29 @@
+digraph "liveness info for 'main' function" {
+label="liveness info for 'main' function";
+	"Nodeentry" [shape=record, label="{Node entry\n	In Vars:  inc lnot found.1 inc9\n	Out Vars:  vla inc lnot found.1 inc9}"];
+	"Nodeentry" -> "Nodewhile.cond";
+	"Nodewhile.cond" [shape=record, label="{Node while.cond\n	In Vars:  vla inc lnot found.1 inc9\n	Out Vars:  vla i.0 lnot found.1 inc9}"];
+	"Nodewhile.cond" -> "Nodewhile.body";
+	"Nodewhile.cond" -> "Nodewhile.end";
+	"Nodewhile.body" [shape=record, label="{Node while.body\n	In Vars:  vla i.0 lnot found.1 inc9\n	Out Vars:  vla inc lnot found.1 inc9}"];
+	"Nodewhile.body" -> "Nodewhile.cond";
+	"Nodewhile.end" [shape=record, label="{Node while.end\n	In Vars:  vla lnot found.1 inc9\n	Out Vars:  vla lnot found.1 inc9}"];
+	"Nodewhile.end" -> "Nodewhile.cond3";
+	"Nodewhile.cond3" [shape=record, label="{Node while.cond3\n	In Vars:  vla lnot found.1 inc9\n	Out Vars:  vla i.1 found.0 lnot}"];
+	"Nodewhile.cond3" -> "Nodeland.rhs";
+	"Nodewhile.cond3" -> "Nodeland.end";
+	"Nodeland.rhs" [shape=record, label="{Node land.rhs\n	In Vars:  vla i.1 found.0\n	Out Vars:  vla i.1 found.0 lnot}"];
+	"Nodeland.rhs" -> "Nodeland.end";
+	"Nodeland.end" [shape=record, label="{Node land.end\n	In Vars:  vla i.1 found.0 lnot\n	Out Vars:  vla i.1 found.0 lnot}"];
+	"Nodeland.end" -> "Nodewhile.body5";
+	"Nodeland.end" -> "Nodewhile.end10";
+	"Nodewhile.body5" [shape=record, label="{Node while.body5\n	In Vars:  vla i.1 found.0 lnot\n	Out Vars:  vla i.1 found.0 lnot}"];
+	"Nodewhile.body5" -> "Nodeif.then";
+	"Nodewhile.body5" -> "Nodeif.end";
+	"Nodeif.then" [shape=record, label="{Node if.then\n	In Vars:  vla i.1 found.0 lnot\n	Out Vars:  vla i.1 found.0 lnot}"];
+	"Nodeif.then" -> "Nodeif.end";
+	"Nodeif.end" [shape=record, label="{Node if.end\n	In Vars:  vla i.1 found.0 lnot\n	Out Vars:  vla lnot found.1 inc9}"];
+	"Nodeif.end" -> "Nodewhile.cond3";
+	"Nodewhile.end10" [shape=record, label="{Node while.end10\n	In Vars:  found.0\n	Out Vars: }"];
+
+}

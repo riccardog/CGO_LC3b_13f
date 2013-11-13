@@ -1,0 +1,12 @@
+digraph "CFG for 'main' function" {
+	label="CFG for 'main' function";
+
+	Node0x189a390 [shape=record,label="{entry:\l  br label %while.cond\l}"];
+	Node0x189a390 -> Node0x189a3f0;
+	Node0x189a3f0 [shape=record,label="{while.cond:                                       \l  %k.0 = phi i32 [ 0, %entry ], [ %add, %if.then ]\l  %cmp = icmp ult i32 %k.0, 100\l  br i1 %cmp, label %if.then, label %while.end\l|{<s0>T|<s1>F}}"];
+	Node0x189a3f0:s0 -> Node0x189c260;
+	Node0x189a3f0:s1 -> Node0x189c2c0;
+	Node0x189c260 [shape=record,label="{if.then:                                          \l  %add = add i32 %k.0, 1\l  br label %while.cond\l}"];
+	Node0x189c260 -> Node0x189a3f0;
+	Node0x189c2c0 [shape=record,label="{while.end:                                        \l  ret i32 1\l}"];
+}

@@ -1,0 +1,306 @@
+//===- DFALiveness.cpp - Example code from "Writing an LLVM Pass" ---------------===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements two versions of the LLVM "DFALiveness World" pass described
+// in docs/WritingAnLLVMPass.html
+//
+//===----------------------------------------------------------------------===//
+
+#include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/StringMap.h"
+#include "llvm/IR/Function.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/FormattedStream.h"
+#include "llvm/ADT/DepthFirstIterator.h"
+#include "llvm/ADT/GraphTraits.h"
+#include "llvm/Support/CFG.h"
+#include <map>
+#include <set>
+#include <iostream>
+
+using namespace llvm;
+using namespace std;
+
+
+namespace {
+
+class DFANode;
+
+  // DFALiveness - The first implementation, without getAnalysisUsage.
+  struct DFALiveness : public FunctionPass {
+    static char ID; // Pass identification, replacement for typeid
+    DFALiveness() : FunctionPass(ID) {}
+
+	void ExampleCode ( raw_ostream& O, Function & F);
+
+	void LivenessAnalysis( Function & F);
+	void PrintLivenessInfoToDot( raw_ostream &O, Function & F);
+
+    virtual bool runOnFunction(Function &F) {
+      errs() << "DFALiveness: ";
+      errs().write_escaped(F.getName()) << '\n';
+	  ExampleCode(errs(), F);
+	  LivenessAnalysis(F);
+	  PrintLivenessInfoToDot(errs(), F);
+      return false;
+    }
+
+//    public:
+//	 static std::map<StringRef, DFANode*> node_map;
+//	 static std::set<StringRef> visited_set;
+
+  };
+
+static std::map<StringRef, DFANode*> node_map = *(new std::map<StringRef, DFANode*>);
+static std::set<StringRef> visited_set = *(new std::set<StringRef>);
+
+
+class DFANode{
+public:
+	BasicBlock *BB;
+	std::set<StringRef> inSet;
+	std::set<StringRef> outSet;
+	std::set<StringRef> defSet;
+	std::set<StringRef> useSet;
+
+	DFANode(BasicBlock *block)
+	{
+		BB = block;
+	}
+
+	std::set<StringRef> setUnion(raw_ostream& O, std::set<StringRef> x, std::set<StringRef> y)
+	{
+		std::set<StringRef> temp;
+		O<<" performing UNION ";
+		if(y.empty()){return x;}
+		O<<" temp size:  "<<temp.size();
+		temp.insert(x.begin(), x.end());
+		O<<" y is not empty, size: "<< y.size();
+		O << "\n\n";
+		std::set<string> test;
+		for(std::set<StringRef>::iterator set_it = y.begin(); set_it != y.end(); ++set_it)
+		{
+			O << set_it->size();
+			O << *set_it << ", ";
+			O<<" test size:  "<<test.size();
+			test.insert(set_it->str());
+		}
+		//temp.insert(y.begin(),y.end());
+		O<<" UNION PERFORMED ";
+		return temp;
+	}
+
+	std::set<StringRef> setErase(std::set<StringRef> original, std::set<StringRef> erased)
+	{
+		std::set<StringRef> temp;
+		if(erased.empty()){return original;}
+		temp.insert(original.begin(), original.end());
+		temp.erase(erased.begin(),erased.end());
+		return temp;
+	}
+
+	void insertVar_in(StringRef x)
+	{
+		inSet.insert(x);
+	}
+
+	void insertVar_use(StringRef x)
+	{
+		useSet.insert(x);
+	}
+
+	void insertVar_def(StringRef x)
+	{
+		defSet.insert(x);
+	}
+
+	void insertVar_out(StringRef x)
+	{
+		outSet.insert(x);
+	}
+
+	bool getIn(raw_ostream& O)
+	{
+		bool changed = false;
+		O<< " Checking if visited ";
+		if(visited_set.find(BB->getName()) != visited_set.end())
+		{
+			return changed;
+		}
+		O<< "visiting input of: " <<BB->getName() << "\n";		
+		visited_set.insert(BB->getName());
+		std::set<StringRef> temp = this->inSet;
+		changed = changed | this->getOut(O);
+		O<< " returned to Input 1 ";
+		this->inSet = setUnion(O, this->useSet,this->setErase(this->outSet,this->defSet));		
+		O<< " passed setUnion ";
+		if(temp != this->inSet) {changed = true;}
+		O<< " passed setcompare ";
+		return changed;
+	}
+
+	bool getOut(raw_ostream& O)
+	{
+		bool changed;
+		O<< "visiting output of: " <<BB->getName() << "\n";
+		std::set<StringRef> temp = this->outSet;
+		O<< " out 1";
+		succ_iterator SI = succ_begin(BB), E = succ_end(BB);
+		O<< " out 2";
+		int i = 0;
+		for ( ; SI != E; ++SI) {
+			BasicBlock * succ_bb = *SI;
+			i++;
+			O<< " XYZ "<<i<<"\n";
+			StringRef temp = succ_bb->getName();
+			changed = changed | node_map[succ_bb->getName()]->getIn(O);
+			O<< temp<<" iter "<<i<<"\n";
+			std::set<StringRef> test_set = node_map[temp]->inSet;
+			O<< temp<<" passed test set Union ";
+			this->outSet = setUnion(O, this->outSet, test_set);
+			O<< temp<<" passed out set Union ";
+		}
+		O<< " out 4";
+		if(temp != this->outSet) {changed = true;}
+		O<< " out 5";
+		return changed;
+	}
+};
+
+
+	
+}
+
+
+char DFALiveness::ID = 0;
+static RegisterPass<DFALiveness> X("dfaliveness", "Data-flow analysis: liveness analysis pass");
+
+void DFALiveness::ExampleCode(raw_ostream& O, Function& F) {
+
+	std::set<StringRef> var_set;
+	var_set.clear();
+	O << "All Variables Defined in Function " << F.getName() <<   "\n";
+	for (Function::iterator FI = F.begin(), FE = F.end(); FI != FE; ++FI) {
+		BasicBlock* BB = dyn_cast<BasicBlock>(&*FI);
+		DFANode *tempNode = new DFANode(BB);
+		node_map[BB->getName()] = tempNode;
+		for (BasicBlock::iterator BI = BB->begin(), BE = BB->end();
+			BI != BE; ++BI) {
+			if ( BI->hasName() ) {
+				StringRef var_name = BI->getValueName()->first();
+				tempNode->insertVar_def(var_name);
+				O << "VARIABLE:\t" << var_name << "\tdefined in ";
+				BI->print(O);
+				O << "\n";
+				var_set.insert(var_name);
+			}
+		}
+	}
+
+	for (Function::iterator FI = F.begin(), FE = F.end(); FI != FE; ++FI) {
+		BasicBlock* BB = dyn_cast<BasicBlock>(&*FI);
+		O << "----------------------------------------------------\n";
+		O << "BB: " << BB ->getName() << '\n';
+		O << "\t All instructions in this bb:\n";
+		for (BasicBlock::iterator BI = BB->begin(), BE = BB->end();
+			BI != BE; ++BI) {
+			O << "\t";
+			BI->print(O);
+			O << "\n";
+			O << "\t\tAll operands in this instruction: \n";
+			unsigned operand_size = BI->getNumOperands();
+			for ( unsigned i = 0; i < operand_size; i ++ ) {
+				O << "\t\t\t" << i << ": ";
+				Value * operand = BI->getOperand(i);
+				if ( operand->hasName() ) {
+				StringRef op_name = operand->getValueName()->first();
+				if ( var_set.find(op_name) != var_set.end() ) {
+					node_map[BB->getName()]->insertVar_use(op_name);
+					O << "\tVar: " << op_name;
+				} else {
+					O << "\tNot a Var: " << op_name;
+				}
+				} else {
+					O << "\tNot a Var: no name";
+				}
+				O << "\n";
+			}
+		}
+	}
+
+	//node_map["if.end"]->useSet = node_map["if.end"]->setUnion(node_map["if.end"]->useSet,node_map["if.end3"]->useSet);
+	//THIS IS WHAT RUNS THE ENTIRE ALGORITHM!!!! 
+	visited_set.clear();
+	node_map["entry"]->getIn(errs());
+	//print out set values:
+	for(std::map<StringRef,DFANode*>::iterator it = node_map.begin(); it!=node_map.end(); ++it)
+	{
+		O << "---------------set values of "<< it->first << "----------------------\n";
+		O << "def set\n";
+		std::set<StringRef> temp_def_set = it->second->defSet;
+		for(std::set<StringRef>::iterator set_it = temp_def_set.begin(); set_it != temp_def_set.end(); ++set_it)
+		{
+			O << *set_it << " ";
+		}
+		O << "\n\n";
+		O << "use set\n";
+		std::set<StringRef> temp_use_set = it->second->useSet;
+		for(std::set<StringRef>::iterator set_it = temp_use_set.begin(); set_it != temp_use_set.end(); ++set_it)
+		{
+			O << *set_it << " ";
+		}
+		O << "\n\n";
+		O << "in set\n";
+		std::set<StringRef> temp_in_set = it->second->inSet;
+		for(std::set<StringRef>::iterator set_it = temp_in_set.begin(); set_it != temp_in_set.end(); ++set_it)
+		{
+			O << *set_it << " ";
+		}
+		O << "\n\n";
+		O << "out set\n";
+		std::set<StringRef> temp_out_set = it->second->outSet;
+		O << "\n\n";
+		for(std::set<StringRef>::iterator set_it = temp_out_set.begin(); set_it != temp_out_set.end(); ++set_it)
+		{
+			O << *set_it << " ";
+		}
+	}
+}
+
+
+//create DFnodes with in, out, use, and def
+//create "recursive" getIn() function --> use + (out - def)
+/*
+{
+	set in_temp  = current.in;
+	current.in = (current.use + (getOut(current) - current.def));
+	if(in_temp is different than current.in) {change = 1;}
+	return current.in;			
+}*/
+//create "recursive" getOut() function --> iterate through child nodes and +insets for each node
+/*
+{
+	set out_temp = current.out;
+	for( all children)
+		current.out = current.out | getIn(current.child)
+	if(out_temp is different than current.out) {change = 1;}
+	return current.out;
+}
+*/
+void DFALiveness::LivenessAnalysis( Function & F) 
+{
+	//first iteration creates each DFNode and assigns it to a specific basic block
+	//while(getIn(first node));	
+}
+
+
+void DFALiveness::PrintLivenessInfoToDot( raw_ostream &O, Function & F) 
+{
+}

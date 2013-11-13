@@ -1,0 +1,319 @@
+//===- DFALiveness.cpp - Example code from "Writing an LLVM Pass" ---------------===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements two versions of the LLVM "DFALiveness World" pass described
+// in docs/WritingAnLLVMPass.html
+//
+//===----------------------------------------------------------------------===//
+
+#include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/StringMap.h"
+#include "llvm/IR/Function.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/FormattedStream.h"
+#include "llvm/ADT/DepthFirstIterator.h"
+#include "llvm/ADT/GraphTraits.h"
+#include "llvm/Support/CFG.h"
+#include <map>
+#include <set>
+#include <iostream>
+
+using namespace llvm;
+using namespace std;
+
+
+namespace {
+
+class DFANode;
+
+  // DFALiveness - The first implementation, without getAnalysisUsage.
+  struct DFALiveness : public FunctionPass {
+    static char ID; // Pass identification, replacement for typeid
+    DFALiveness() : FunctionPass(ID) {}
+
+	void ExampleCode ( raw_ostream& O, Function & F);
+
+	void LivenessAnalysis( Function & F);
+	void PrintLivenessInfoToDot( raw_ostream &O, Function & F);
+
+    virtual bool runOnFunction(Function &F) {
+      errs() << "DFALiveness: ";
+      errs().write_escaped(F.getName()) << '\n';
+	  ExampleCode(errs(), F);
+	  
+	  //LivenessAnalysis(F);
+	  //PrintLivenessInfoToDot(errs(), F);
+      return false;
+    }
+
+//    public:
+//	 static std::map<StringRef, DFANode*> node_map;
+//	 static std::set<StringRef> visited_set;
+
+  };
+
+static std::map<string, DFANode*> node_map;// = new std::map<string, DFANode*>();
+static std::set<string> visited_set;// = new std::set<string>();
+
+
+class DFANode{
+public:
+	BasicBlock *BB;
+	std::set<string> inSet;
+	std::set<string> outSet;
+	std::set<string> defSet;
+	std::set<string> useSet;
+
+	DFANode(BasicBlock *block)
+	{
+		BB = block;
+	}
+
+	void setUnion(raw_ostream& O, std::set<string>* x, std::set<string>* y)
+	{
+		//std::set<string> temp;
+		//O<<" entered union function\n";
+		if(y->empty()){return;}
+		//O<<" entered union function2\n";
+		//if(x.empty()){x = y;}
+		//O<<" entered union function3\n";
+		//std::set<string>::iterator y_copy = y.begin();
+		//std::set<string>::iterator y_end = y.end();
+		x->insert(y->begin(), y->end());
+		O<<" UNION PERFORMED \n";
+		return;		
+	}
+
+	void setErase(raw_ostream& O, std::set<string>* original, std::set<string>* erased)
+	{
+		if(erased->empty()){return;}
+		if(original->empty()){return;}
+		//O<<" about to erase\n";
+		//std::set<string>::iterator erased_copy = erased.begin();
+		//std::set<string>::iterator erased_end = erased.end();
+		//O<<" getting stuck in erase \n";	
+		original->erase(erased->begin(),erased->end());
+		O<<" ERASE PERFORMED \n";
+		return;
+	}
+
+	void insertVar_in(string x)
+	{
+		inSet.insert(x);
+	}
+
+	void insertVar_use(string x)
+	{
+		useSet.insert(x);
+	}
+
+	void insertVar_def(string x)
+	{
+		defSet.insert(x);
+	}
+
+	void insertVar_out(string x)
+	{
+		outSet.insert(x);
+	}
+
+	bool getIn(raw_ostream& O)
+	{
+		bool changed = false;
+		if(visited_set.find(BB->getName().str()) != visited_set.end())
+		{
+			return changed;
+		}
+		visited_set.insert(BB->getName().str());	
+		std::set<string>* temp_in = new std::set<string>();
+		*temp_in = this->inSet;
+		changed = changed | this->getOut(O);
+		setUnion(O, &inSet, &outSet);
+		setUnion(O, &inSet, &useSet);		
+		setErase(O, &inSet, &defSet);
+		if(!(*temp_in == this->inSet)) {changed = true;}
+		delete temp_in;
+		return changed;
+	}
+
+	bool getOut(raw_ostream& O)
+	{
+		bool changed;
+		std::set<string> *temp_out =  new std::set<string>();
+		*temp_out = this->outSet;
+		succ_iterator SI = succ_begin(BB), E = succ_end(BB);
+		for ( ; SI != E; ++SI) 
+		{
+			BasicBlock * succ_bb = *SI;
+			string temp = succ_bb->getName().str();
+			changed = changed | node_map[temp]->getIn(O);
+			std::set<string> test_set = node_map[temp]->inSet;
+			setUnion(O, &outSet, &test_set);		
+		}
+		if(!(*temp_out == this->outSet)) {changed = true;}
+		delete temp_out;
+		return changed;
+	}
+};
+
+
+	
+}
+
+
+char DFALiveness::ID = 0;
+static RegisterPass<DFALiveness> X("dfaliveness", "Data-flow analysis: liveness analysis pass");
+
+void DFALiveness::ExampleCode(raw_ostream& O, Function& F) {
+
+	std::set<StringRef> var_set;
+	var_set.clear();
+	O << "All Variables Defined in Function " << F.getName() <<   "\n";
+	for (Function::iterator FI = F.begin(), FE = F.end(); FI != FE; ++FI) {
+		BasicBlock* BB = dyn_cast<BasicBlock>(&*FI);
+		DFANode *tempNode = new DFANode(BB);
+		node_map[BB->getName().str()] = tempNode;
+		for (BasicBlock::iterator BI = BB->begin(), BE = BB->end();
+			BI != BE; ++BI) {
+			if ( BI->hasName() ) {
+				StringRef var_name = BI->getValueName()->first();
+				tempNode->insertVar_def(var_name.str());
+				O << "VARIABLE:\t" << var_name << "\tdefined in ";
+				BI->print(O);
+				O << "\n";
+				var_set.insert(var_name);
+			}
+		}
+	}
+
+	for (Function::iterator FI = F.begin(), FE = F.end(); FI != FE; ++FI) {
+		BasicBlock* BB = dyn_cast<BasicBlock>(&*FI);
+		O << "----------------------------------------------------\n";
+		O << "BB: " << BB ->getName() << '\n';
+		O << "\t All instructions in this bb:\n";
+		for (BasicBlock::iterator BI = BB->begin(), BE = BB->end();
+			BI != BE; ++BI) {
+			O << "\t";
+			BI->print(O);
+			O << "\n";
+			O << "\t\tAll operands in this instruction: \n";
+			unsigned operand_size = BI->getNumOperands();
+			for ( unsigned i = 0; i < operand_size; i ++ ) {
+				O << "\t\t\t" << i << ": ";
+				Value * operand = BI->getOperand(i);
+				if ( operand->hasName() ) {
+				StringRef op_name = operand->getValueName()->first();
+				if ( var_set.find(op_name) != var_set.end() ) {
+					node_map[BB->getName().str()]->insertVar_use(op_name.str());
+					O << "\tVar: " << op_name;
+				} else {
+					O << "\tNot a Var: " << op_name;
+				}
+				} else {
+					O << "\tNot a Var: no name";
+				}
+				O << "\n";
+			}
+		}
+	}
+
+	//node_map["if.end"]->useSet = node_map["if.end"]->setUnion(node_map["if.end"]->useSet,node_map["if.end3"]->useSet);
+	//THIS IS WHAT RUNS THE ENTIRE ALGORITHM!!!! 
+	visited_set.clear();
+	while(node_map["entry"]->getIn(errs()));
+	//{
+	//	O<< "\n\n NEW ITERATION \n\n";
+	//	visited_set.clear();}
+	//print out set values:
+//	for(std::map<string,DFANode*>::iterator it = node_map.begin(); it!=node_map.end(); ++it)
+//	{
+	for (Function::iterator FI = F.begin(), FE = F.end(); FI != FE; ++FI) {
+		BasicBlock* BB = dyn_cast<BasicBlock>(&*FI);
+		DFANode *current = node_map[BB->getName().str()];
+		O << "---------------set values of "<< current->BB->getName() << "----------------------\n";
+		O << "def set\n"<<"Current Def set size: "<<current->defSet.size()<<"\n";
+		//std::set<string> temp_def_set = current->defSet;
+		O << "temp def set created\n";
+		
+		std::set<string>::iterator xyz = current->defSet.find("cmp");
+		std::set<string>::iterator abc = current->defSet.end();
+
+		if(xyz == abc)
+			{
+			O<<"Not Found cmp\n";
+			}
+
+		for(std::set<string>::iterator set_it = current->defSet.begin(); set_it != current->defSet.end(); ++set_it)
+		{
+		//if(set_it == 0)
+		//	{
+		//	O<<"null pointer\n";
+		//	}
+			O<<"Pre print set_it";
+			
+			O << *set_it << " ";
+		}
+		O << "\n\n";
+		O << "use set\n";
+		std::set<string> temp_use_set = current->useSet;
+		for(std::set<string>::iterator set_it = temp_use_set.begin(); set_it != temp_use_set.end(); ++set_it)
+		{
+			O << *set_it << " ";
+		}
+		O << "\n\n";
+		O << "in set\n";
+		std::set<string> temp_in_set = current->inSet;
+		for(std::set<string>::iterator set_it = temp_in_set.begin(); set_it != temp_in_set.end(); ++set_it)
+		{
+			O << *set_it << " ";
+		}
+		O << "\n\n";
+		O << "out set\n";
+		std::set<string> temp_out_set = current->outSet;
+		for(std::set<string>::iterator set_it = temp_out_set.begin(); set_it != temp_out_set.end(); ++set_it)
+		{
+			O << *set_it << " ";
+		}
+		O << "\n\n";
+		
+	}
+	O << "stuck3\n";
+}
+
+
+//create DFnodes with in, out, use, and def
+//create "recursive" getIn() function --> use + (out - def)
+/*
+{
+	set in_temp  = current.in;
+	current.in = (current.use + (getOut(current) - current.def));
+	if(in_temp is different than current.in) {change = 1;}
+	return current.in;			
+}*/
+//create "recursive" getOut() function --> iterate through child nodes and +insets for each node
+/*
+{
+	set out_temp = current.out;
+	for( all children)
+		current.out = current.out | getIn(current.child)
+	if(out_temp is different than current.out) {change = 1;}
+	return current.out;
+}
+*/
+void DFALiveness::LivenessAnalysis( Function & F) 
+{
+	//first iteration creates each DFNode and assigns it to a specific basic block
+	//while(getIn(first node));	
+}
+
+
+void DFALiveness::PrintLivenessInfoToDot( raw_ostream &O, Function & F) 
+{
+}
