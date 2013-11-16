@@ -1,0 +1,48 @@
+
+[common] subdirectories = MCTaregetDesc TargetInfo
+
+[component_0]
+# TargetGroup components are an extension of LibraryGroups, specifically for 
+# defining LLVM targets (which are handled specifically in a few places). 
+
+type =TargetGroup
+# The name of the comonent should always be the name of the target. (should
+# match "def Cpu0 : Target" in Cpu0.td)
+name = LC3b
+# LC3b component is located in directory Target/
+parent = Target
+# Whether this target defines an assembly parser, assembly printer, disassembler
+# , and supports JIT compilation. They are optional.
+#has_asmparser = 1
+#has_asmprinter = 1
+#has_disassembler = 1
+#has_jit = 1
+#please enable asmprinter
+has_asmprinter=1
+
+
+
+[component_1]
+# component_1 is a Library type and name is LC3bCodeGen. After build it will
+# in lib/libLLVMCpu0CodeGen.a of your build command directory.
+type = Library
+name = LC3bCodeGen
+# LC3bCodeGen component(Library) is located in directory Cpu0/
+parent = LC3b
+# If given, a list of the names of Library or LibraryGroup components which
+# must also be linked in whenever this library is used. That is, the link time
+# dependencies for this component. When tools are built, the build system will
+# include the transitive closure of all required_libraries for the components
+# the tool needs.
+
+required_libraries = CodeGen Core MC LC3bDesc LC3bInfo SelectionDAG Support  Target AsmPrinter LC3bAsmPrinter
+# All LLVMBuild.txt in Target/LC3b and subdirectory use ’add_to_library_groups
+# = LC3b'
+add_to_library_groups = LC3b
+
+
+
+
+
+
+
