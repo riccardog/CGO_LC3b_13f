@@ -1,0 +1,18 @@
+There are several steps you should do.
+
+1. Download cmake (sudo apt-get install cmake)
+
+2. Set up your .bash_profile
+create .bash_profile at your home directory
+export PATH=$PATH:/home/kyushick/work/svn_work/CGO_Project/CGO_LC3b_13f/llvm/Release+Asserts/bin
+and save it and exit. then source it(source .bash_profile)
+
+3. go to the gitworkingdir/llvm/test
+
+4. mkdir cmake_debug_build
+
+5. cd cmake_debug_build
+
+6. cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Debug -G "Unix Makefiles" ../src/
+
+7. That's it.
